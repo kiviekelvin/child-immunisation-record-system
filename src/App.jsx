@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { authService } from './lib/authService';
-git
+
 // Components
 import { Layout } from './components/Layout';
 import { LoginForm } from './components/auth/LoginForm';
