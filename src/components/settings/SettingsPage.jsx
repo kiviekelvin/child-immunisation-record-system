@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { User, Shield, Bell, Database, Save } from 'lucide-react';
+import { authService } from '../../lib/authService';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
 import { AlertModal } from '../ui/Modal';
 
@@ -34,12 +35,9 @@ export function SettingsPage({ user }) {
     setLoading(true);
 
     try {
-      // Update user profile in localStorage
-      const currentUser = JSON.parse(localStorage.getItem('cirs_current_user') || '{}');
-      const updatedUser = { ...currentUser, full_name: profileData.full_name };
-      localStorage.setItem('cirs_current_user', JSON.stringify(updatedUser));
-      
-      setModalMessage('Profile updated successfully');
+      await authService.updateProfile({ full_name: profileData.full_name });
+
+      setModalMessage('Profile updated successfully. Refresh the page to see the change reflected everywhere.');
       setShowSuccessModal(true);
     } catch (err) {
       setModalMessage(err.message);
@@ -53,7 +51,7 @@ export function SettingsPage({ user }) {
     setLoading(true);
 
     try {
-      // Simulate password reset
+      await authService.sendPasswordReset(user.email);
       setModalMessage('Password reset email sent');
       setShowSuccessModal(true);
     } catch (err) {

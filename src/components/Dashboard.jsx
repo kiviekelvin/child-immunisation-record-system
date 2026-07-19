@@ -20,7 +20,7 @@ export function Dashboard({ user }) {
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
-      
+
       if (user.role === 'parent') {
         await fetchParentDashboard();
       } else {
@@ -34,21 +34,21 @@ export function Dashboard({ user }) {
   };
 
   const fetchParentDashboard = async () => {
-    const children = dataService.getPatients().filter(p => p.parent_id === user.id);
-    
+    const allPatients = await dataService.getPatients();
+    const children = allPatients.filter((p) => p.parent_id === user.id);
+
     if (children.length > 0) {
-      const childIds = children.map(child => child.id);
-      const vaccinations = dataService.getVaccinationRecords().filter(v => 
-        childIds.includes(v.patient_id)
-      );
+      const childIds = children.map((child) => child.id);
+      const allVaccinations = await dataService.getVaccinationRecords();
+      const vaccinations = allVaccinations.filter((v) => childIds.includes(v.patient_id));
 
       const now = new Date();
       const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      
-      const overdue = vaccinations.filter(v => !v.administered_date && new Date(v.due_date) < now);
-      const upcoming = vaccinations.filter(v => !v.administered_date && new Date(v.due_date) >= now);
-      const thisMonthVaccinations = vaccinations.filter(v => 
-        v.administered_date && new Date(v.administered_date) >= thisMonth
+
+      const overdue = vaccinations.filter((v) => !v.administered_date && new Date(v.due_date) < now);
+      const upcoming = vaccinations.filter((v) => !v.administered_date && new Date(v.due_date) >= now);
+      const thisMonthVaccinations = vaccinations.filter(
+        (v) => v.administered_date && new Date(v.administered_date) >= thisMonth
       );
 
       setStats({
@@ -58,33 +58,39 @@ export function Dashboard({ user }) {
         upcomingVaccinations: upcoming.length,
       });
 
-      const patients = dataService.getPatients();
-      const vaccines = dataService.getVaccines();
-      
+      // dataService.getVaccinationRecords() already attaches .patients and
+      // .vaccines to each record, so no separate lookup is needed here.
       setUpcomingVaccinations(
-        upcoming.slice(0, 5).map(v => ({
+        upcoming.slice(0, 5).map((v) => ({
           id: v.id,
-          patient_name: patients.find(p => p.id === v.patient_id)?.full_name || 'Unknown',
-          vaccine_name: vaccines.find(vac => vac.id === v.vaccine_id)?.name || 'Unknown',
+          patient_name: v.patients?.full_name || 'Unknown',
+          vaccine_name: v.vaccines?.name || 'Unknown',
           due_date: v.due_date,
           status: getVaccineStatus(v.due_date, v.administered_date),
         }))
       );
+    } else {
+      setStats({
+        totalPatients: 0,
+        vaccinationsThisMonth: 0,
+        overdueVaccinations: 0,
+        upcomingVaccinations: 0,
+      });
+      setUpcomingVaccinations([]);
     }
   };
 
   const fetchHealthcareDashboard = async () => {
-    const patients = dataService.getPatients();
-    const vaccinations = dataService.getVaccinationRecords();
-    const vaccines = dataService.getVaccines();
+    const patients = await dataService.getPatients();
+    const vaccinations = await dataService.getVaccinationRecords();
 
     const now = new Date();
     const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    
-    const overdue = vaccinations.filter(v => !v.administered_date && new Date(v.due_date) < now);
-    const upcoming = vaccinations.filter(v => !v.administered_date && new Date(v.due_date) >= now);
-    const thisMonthVaccinations = vaccinations.filter(v => 
-      v.administered_date && new Date(v.administered_date) >= thisMonth
+
+    const overdue = vaccinations.filter((v) => !v.administered_date && new Date(v.due_date) < now);
+    const upcoming = vaccinations.filter((v) => !v.administered_date && new Date(v.due_date) >= now);
+    const thisMonthVaccinations = vaccinations.filter(
+      (v) => v.administered_date && new Date(v.administered_date) >= thisMonth
     );
 
     setStats({
@@ -95,10 +101,10 @@ export function Dashboard({ user }) {
     });
 
     setUpcomingVaccinations(
-      upcoming.slice(0, 5).map(v => ({
+      upcoming.slice(0, 5).map((v) => ({
         id: v.id,
-        patient_name: patients.find(p => p.id === v.patient_id)?.full_name || 'Unknown',
-        vaccine_name: vaccines.find(vac => vac.id === v.vaccine_id)?.name || 'Unknown',
+        patient_name: v.patients?.full_name || 'Unknown',
+        vaccine_name: v.vaccines?.name || 'Unknown',
         due_date: v.due_date,
         status: getVaccineStatus(v.due_date, v.administered_date),
       }))

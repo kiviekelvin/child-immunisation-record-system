@@ -9,7 +9,7 @@ import { AlertModal } from '../ui/Modal';
 
 const vaccinationSchema = z.object({
   patient_id: z.string().min(1, 'Please select a patient'),
-  vaccine_id: z.string().min(1, 'Please select a vaccine'),
+  vaccine_name: z.string().min(1, 'Please select a vaccine'),
   due_date: z.string().min(1, 'Due date is required'),
   administered_date: z.string().optional(),
   administered_by: z.string().optional(),
@@ -52,8 +52,8 @@ export function VaccinationForm() {
 
   const fetchInitialData = async () => {
     try {
-      const patientsData = dataService.getPatients();
-      const vaccinesData = dataService.getVaccines();
+      const patientsData = await dataService.getPatients();
+      const vaccinesData = await dataService.getVaccines();
 
       setPatients(patientsData);
       setVaccines(vaccinesData);
@@ -68,12 +68,12 @@ export function VaccinationForm() {
     if (!id) return;
 
     try {
-      const data = dataService.getVaccinationRecord(id);
-      
+      const data = await dataService.getVaccinationRecord(id);
+
       if (data) {
         reset({
           patient_id: data.patient_id,
-          vaccine_id: data.vaccine_id,
+          vaccine_name: data.vaccine_name,
           due_date: data.due_date,
           administered_date: data.administered_date || '',
           administered_by: data.administered_by || '',
@@ -97,9 +97,9 @@ export function VaccinationForm() {
       };
 
       if (isEditing) {
-        dataService.updateVaccinationRecord(id, submitData);
+        await dataService.updateVaccinationRecord(id, submitData);
       } else {
-        dataService.createVaccinationRecord(submitData);
+        await dataService.createVaccinationRecord(submitData);
       }
 
       navigate('/vaccinations');
@@ -162,19 +162,19 @@ export function VaccinationForm() {
               </div>
 
               <div>
-                <label htmlFor="vaccine_id" className="form-label">
+                <label htmlFor="vaccine_name" className="form-label">
                   Vaccine *
                 </label>
-                <select id="vaccine_id" {...register('vaccine_id')} className="form-input">
+                <select id="vaccine_name" {...register('vaccine_name')} className="form-input">
                   <option value="">Select vaccine</option>
                   {vaccines.map((vaccine) => (
-                    <option key={vaccine.id} value={vaccine.id}>
+                    <option key={vaccine.id} value={vaccine.name}>
                       {vaccine.name}
                     </option>
                   ))}
                 </select>
-                {errors.vaccine_id && (
-                  <p className="mt-1 text-sm text-red-600">{errors.vaccine_id.message}</p>
+                {errors.vaccine_name && (
+                  <p className="mt-1 text-sm text-red-600">{errors.vaccine_name.message}</p>
                 )}
               </div>
 

@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { dataService } from '../../lib/dataService';
+import { authService } from '../../lib/authService';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
 import { AlertModal } from '../ui/Modal';
 
@@ -11,7 +12,7 @@ const patientSchema = z.object({
   full_name: z.string().min(2, 'Name must be at least 2 characters'),
   date_of_birth: z.string().min(1, 'Date of birth is required'),
   gender: z.enum(['male', 'female']),
-  parent_name: z.string().min(2, 'Parent/Guardian name is required'),
+  parent_id: z.string().min(1, 'Please select a parent/guardian'),
   phone: z.string().min(10, 'Phone number must be at least 10 digits'),
   email: z.string().email('Invalid email address'),
   address: z.string().min(5, 'Address is required'),
@@ -23,9 +24,10 @@ export function PatientForm() {
   const navigate = useNavigate();
   const { id } = useParams();
   const isEditing = !!id;
-  
+
   const [loading, setLoading] = useState(false);
-  const [initialLoading, setInitialLoading] = useState(isEditing);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [parents, setParents] = useState([]);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -39,24 +41,39 @@ export function PatientForm() {
   });
 
   useEffect(() => {
+    fetchParents();
+  }, []);
+
+  useEffect(() => {
     if (isEditing) {
       fetchPatient();
+    } else {
+      setInitialLoading(false);
     }
   }, [id, isEditing]);
+
+  const fetchParents = async () => {
+    try {
+      const data = await authService.getParents();
+      setParents(data);
+    } catch (error) {
+      console.error('Error fetching parent accounts:', error);
+    }
+  };
 
   const fetchPatient = async () => {
     if (!id) return;
 
     try {
       setInitialLoading(true);
-      const data = dataService.getPatient(id);
-      
+      const data = await dataService.getPatient(id);
+
       if (data) {
         reset({
           full_name: data.full_name,
           date_of_birth: data.date_of_birth,
           gender: data.gender,
-          parent_name: data.parent_name,
+          parent_id: data.parent_id || '',
           phone: data.phone,
           email: data.email,
           address: data.address,
@@ -75,10 +92,16 @@ export function PatientForm() {
     try {
       setLoading(true);
 
+      const selectedParent = parents.find((p) => p.id === data.parent_id);
+      const submitData = {
+        ...data,
+        parent_name: selectedParent?.full_name || '',
+      };
+
       if (isEditing) {
-        dataService.updatePatient(id, data);
+        await dataService.updatePatient(id, submitData);
       } else {
-        dataService.createPatient(data);
+        await dataService.createPatient(submitData);
       }
 
       navigate('/patients');
@@ -169,18 +192,24 @@ export function PatientForm() {
               </div>
 
               <div>
-                <label htmlFor="parent_name" className="form-label">
-                  Parent/Guardian Name *
+                <label htmlFor="parent_id" className="form-label">
+                  Parent/Guardian *
                 </label>
-                <input
-                  type="text"
-                  id="parent_name"
-                  {...register('parent_name')}
-                  className="form-input"
-                  placeholder="Enter parent/guardian name"
-                />
-                {errors.parent_name && (
-                  <p className="mt-1 text-sm text-red-600">{errors.parent_name.message}</p>
+                <select id="parent_id" {...register('parent_id')} className="form-input">
+                  <option value="">Select parent/guardian</option>
+                  {parents.map((parent) => (
+                    <option key={parent.id} value={parent.id}>
+                      {parent.full_name} ({parent.email})
+                    </option>
+                  ))}
+                </select>
+                {errors.parent_id && (
+                  <p className="mt-1 text-sm text-red-600">{errors.parent_id.message}</p>
+                )}
+                {parents.length === 0 && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    No parent accounts found yet. A parent needs to register first.
+                  </p>
                 )}
               </div>
 

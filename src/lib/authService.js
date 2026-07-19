@@ -1,159 +1,181 @@
-// Simple authentication service using localStorage
-const STORAGE_KEYS = {
-  CURRENT_USER: 'cirs_current_user',
-  USERS: 'cirs_users',
-  PENDING_REGISTRATIONS: 'cirs_pending_registrations'
-};
+// Supabase-backed authentication service
+// Same exported function names as the old localStorage version,
+// so most of the app can call this the same way — with one exception:
+// getCurrentUser() is now ASYNC (it wasn't before). Any caller doing
+// `const user = authService.getCurrentUser()` must become
+// `const user = await authService.getCurrentUser()`.
 
-// Demo users
-const defaultUsers = [
-  {
-    id: 'admin-1',
-    email: 'admin@cirs.demo',
-    password: 'admin123',
-    role: 'admin',
-    full_name: 'Dr. Sarah Johnson',
-    created_at: '2024-01-01T00:00:00Z'
-  },
-  {
-    id: 'nurse-1',
-    email: 'nurse@cirs.demo',
-    password: 'nurse123',
-    role: 'healthcare_worker',
-    full_name: 'Nurse Mary Wilson',
-    created_at: '2024-01-01T00:00:00Z'
-  },
-  {
-    id: 'parent-1',
-    email: 'parent@cirs.demo',
-    password: 'parent123',
-    role: 'parent',
-    full_name: 'John Smith',
-    created_at: '2024-01-01T00:00:00Z'
-  }
-];
-
-// Initialize default data if not exists
-const initializeData = () => {
-  if (!localStorage.getItem(STORAGE_KEYS.USERS)) {
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(defaultUsers));
-  }
-  
-  if (!localStorage.getItem(STORAGE_KEYS.PENDING_REGISTRATIONS)) {
-    const defaultPending = [
-      {
-        id: 'pending-1',
-        email: 'jane.doe@email.com',
-        password: 'password123',
-        full_name: 'Jane Doe',
-        role: 'healthcare_worker',
-        status: 'pending',
-        created_at: '2024-12-19T10:30:00Z'
-      },
-      {
-        id: 'pending-2',
-        email: 'bob.smith@email.com',
-        password: 'password123',
-        full_name: 'Bob Smith',
-        role: 'parent',
-        status: 'pending',
-        created_at: '2024-12-19T14:15:00Z'
-      }
-    ];
-    localStorage.setItem(STORAGE_KEYS.PENDING_REGISTRATIONS, JSON.stringify(defaultPending));
-  }
-};
-
-// Initialize data on load
-initializeData();
+import { supabase } from './supabaseClient';
 
 export const authService = {
   // Sign in user
   signIn: async (email, password) => {
-    const users = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
-    const user = users.find(u => u.email === email && u.password === password);
-    
-    if (!user) {
-      throw new Error('Invalid email or password');
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      throw new Error(error.message);
     }
-    
-    // Remove password from stored user data
-    const { password: _, ...userWithoutPassword } = user;
-    localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(userWithoutPassword));
-    
-    return userWithoutPassword;
+
+    // Fetch the matching profile row (role, approval_status, full_name)
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', data.user.id)
+      .single();
+
+    if (profileError) {
+      throw new Error('Could not load user profile');
+    }
+
+    // Block sign-in for healthcare workers still awaiting approval
+    if (profile.role === 'healthcare_worker' && profile.approval_status !== 'approved') {
+      await supabase.auth.signOut();
+      throw new Error('Your account is still pending admin approval');
+    }
+
+    return {
+      id: data.user.id,
+      email: data.user.email,
+      full_name: profile.full_name,
+      role: profile.role,
+      approval_status: profile.approval_status,
+      created_at: profile.created_at,
+    };
   },
 
-  // Sign up user (add to pending registrations)
+  // Sign up user
+  // userData = { email, password, full_name, role }
+  // Parents are auto-approved by the DB trigger; healthcare_worker signups
+  // land as 'pending' until an admin approves them (see updateRegistrationStatus).
   signUp: async (userData) => {
-    const users = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
-    const pending = JSON.parse(localStorage.getItem(STORAGE_KEYS.PENDING_REGISTRATIONS) || '[]');
-    
-    // Check if user already exists
-    const existingUser = users.find(u => u.email === userData.email);
-    const existingPending = pending.find(p => p.email === userData.email);
-    
-    if (existingUser || existingPending) {
-      throw new Error('User with this email already exists');
+    const { email, password, full_name, role } = userData;
+
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          full_name,
+          role,
+        },
+      },
+    });
+
+    if (error) {
+      throw new Error(error.message);
     }
-    
-    const newRegistration = {
-      id: `pending-${Date.now()}`,
-      ...userData,
-      status: 'pending',
-      created_at: new Date().toISOString()
+
+    return {
+      id: data.user?.id,
+      email,
+      full_name,
+      role,
+      status: role === 'parent' ? 'approved' : 'pending',
     };
-    
-    pending.push(newRegistration);
-    localStorage.setItem(STORAGE_KEYS.PENDING_REGISTRATIONS, JSON.stringify(pending));
-    
-    return newRegistration;
   },
 
   // Sign out user
-  signOut: () => {
-    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
-  },
-
-  // Get current user
-  getCurrentUser: () => {
-    const userData = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
-    return userData ? JSON.parse(userData) : null;
-  },
-
-  // Get pending registrations
-  getPendingRegistrations: () => {
-    return JSON.parse(localStorage.getItem(STORAGE_KEYS.PENDING_REGISTRATIONS) || '[]');
-  },
-
-  // Approve/reject registration
-  updateRegistrationStatus: (registrationId, status) => {
-    const pending = JSON.parse(localStorage.getItem(STORAGE_KEYS.PENDING_REGISTRATIONS) || '[]');
-    const users = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
-    
-    const registration = pending.find(p => p.id === registrationId);
-    if (!registration) {
-      throw new Error('Registration not found');
+  signOut: async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      throw new Error(error.message);
     }
-    
-    // Update status
-    registration.status = status;
-    
-    // If approved, create user account with password
-    if (status === 'approved') {
-      const newUser = {
-        id: `user-${Date.now()}`,
-        email: registration.email,
-        password: registration.password, // Keep the original password
-        role: registration.role,
-        full_name: registration.full_name,
-        created_at: new Date().toISOString()
-      };
-      users.push(newUser);
-      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+  },
+
+  // Get current user (ASYNC now — callers must await this)
+  getCurrentUser: async () => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const session = sessionData?.session;
+
+    if (!session) {
+      return null;
     }
-    
-    localStorage.setItem(STORAGE_KEYS.PENDING_REGISTRATIONS, JSON.stringify(pending));
-    return registration;
-  }
+
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', session.user.id)
+      .single();
+
+    if (error || !profile) {
+      return null;
+    }
+
+    return {
+      id: session.user.id,
+      email: session.user.email,
+      full_name: profile.full_name,
+      role: profile.role,
+      approval_status: profile.approval_status,
+      created_at: profile.created_at,
+    };
+  },
+
+  // Get healthcare worker registrations (pending, approved, and rejected)
+  // so the admin UI can show counts for all three, not just pending.
+  // Admin-only: enforced by the RLS policy on `profiles`, not by this code.
+  getPendingRegistrations: async () => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('role', 'healthcare_worker')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return data;
+  },
+
+  // Update the current user's profile (currently just full_name)
+  updateProfile: async (updates) => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const session = sessionData?.session;
+
+    if (!session) {
+      throw new Error('Not signed in');
+    }
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .update(updates)
+      .eq('id', session.user.id)
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return data;
+  },
+
+  // Send a password reset email to the given address
+  sendPasswordReset: async (email) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    if (error) {
+      throw new Error(error.message);
+    }
+  },
+
+  // Get all parent accounts, for staff to select when linking a new patient
+  // to their parent/guardian. Requires the "Staff can view parent profiles"
+  // RLS policy — will return an empty list (not an error) for non-staff.
+  getParents: async () => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, full_name, email')
+      .eq('role', 'parent')
+      .order('full_name', { ascending: true });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return data;
+  },
 };

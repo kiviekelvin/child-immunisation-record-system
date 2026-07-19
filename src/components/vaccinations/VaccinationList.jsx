@@ -18,7 +18,7 @@ export function VaccinationList({ userRole }) {
   const fetchVaccinations = async () => {
     try {
       setLoading(true);
-      const data = dataService.getVaccinationRecords();
+      const data = await dataService.getVaccinationRecords();
       setVaccinations(data);
     } catch (error) {
       console.error('Error fetching vaccinations:', error);

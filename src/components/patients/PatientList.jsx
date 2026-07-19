@@ -18,7 +18,7 @@ export function PatientList({ userRole }) {
   const fetchPatients = async () => {
     try {
       setLoading(true);
-      const data = dataService.getPatients();
+      const data = await dataService.getPatients();
       setPatients(data);
     } catch (error) {
       console.error('Error fetching patients:', error);

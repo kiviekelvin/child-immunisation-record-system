@@ -9,7 +9,7 @@ export function PendingRegistrations() {
   const [registrations, setRegistrations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState(null);
-  
+
   // Modal states
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -21,10 +21,10 @@ export function PendingRegistrations() {
     fetchPendingRegistrations();
   }, []);
 
-  const fetchPendingRegistrations = () => {
+  const fetchPendingRegistrations = async () => {
     try {
       setLoading(true);
-      const data = authService.getPendingRegistrations();
+      const data = await authService.getPendingRegistrations();
       setRegistrations(data);
     } catch (error) {
       console.error('Error fetching pending registrations:', error);
@@ -48,13 +48,13 @@ export function PendingRegistrations() {
 
     try {
       setProcessingId(registrationId);
-      
-      const status = action === 'approve' ? 'approved' : 'rejected';
-      authService.updateRegistrationStatus(registrationId, status);
-      
-      // Refresh the list
-      fetchPendingRegistrations();
-      
+
+      const approval_status = action === 'approve' ? 'approved' : 'rejected';
+      await authService.updateRegistrationStatus(registrationId, approval_status);
+
+      // Refresh the list so counts and status badges reflect the change
+      await fetchPendingRegistrations();
+
       setModalMessage(
         `Registration for ${registration.full_name} has been ${action === 'approve' ? 'approved' : 'rejected'} successfully!`
       );
@@ -69,8 +69,8 @@ export function PendingRegistrations() {
     }
   };
 
-  const getStatusIcon = (status) => {
-    switch (status) {
+  const getStatusIcon = (approval_status) => {
+    switch (approval_status) {
       case 'approved':
         return <CheckCircle className="h-5 w-5 text-green-500" />;
       case 'rejected':
@@ -80,8 +80,8 @@ export function PendingRegistrations() {
     }
   };
 
-  const getStatusColor = (status) => {
-    switch (status) {
+  const getStatusColor = (approval_status) => {
+    switch (approval_status) {
       case 'approved': return 'text-green-600 bg-green-100';
       case 'rejected': return 'text-red-600 bg-red-100';
       default: return 'text-orange-600 bg-orange-100';
@@ -126,7 +126,7 @@ export function PendingRegistrations() {
         onConfirm={handleConfirmApproval}
         title={`${pendingAction?.action === 'approve' ? 'Approve' : 'Reject'} Registration`}
         message={
-          pendingAction 
+          pendingAction
             ? `Are you sure you want to ${pendingAction.action} the registration for ${pendingAction.registration.full_name}?`
             : ''
         }
@@ -156,7 +156,7 @@ export function PendingRegistrations() {
                     Pending Review
                   </dt>
                   <dd className="text-lg font-medium text-gray-900">
-                    {registrations.filter(r => r.status === 'pending').length}
+                    {registrations.filter(r => r.approval_status === 'pending').length}
                   </dd>
                 </dl>
               </div>
@@ -176,7 +176,7 @@ export function PendingRegistrations() {
                     Approved
                   </dt>
                   <dd className="text-lg font-medium text-gray-900">
-                    {registrations.filter(r => r.status === 'approved').length}
+                    {registrations.filter(r => r.approval_status === 'approved').length}
                   </dd>
                 </dl>
               </div>
@@ -196,7 +196,7 @@ export function PendingRegistrations() {
                     Rejected
                   </dt>
                   <dd className="text-lg font-medium text-gray-900">
-                    {registrations.filter(r => r.status === 'rejected').length}
+                    {registrations.filter(r => r.approval_status === 'rejected').length}
                   </dd>
                 </dl>
               </div>
@@ -257,14 +257,14 @@ export function PendingRegistrations() {
                   </td>
                   <td className="table-cell">
                     <div className="flex items-center space-x-2">
-                      {getStatusIcon(registration.status)}
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${getStatusColor(registration.status)}`}>
-                        {registration.status}
+                      {getStatusIcon(registration.approval_status)}
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${getStatusColor(registration.approval_status)}`}>
+                        {registration.approval_status}
                       </span>
                     </div>
                   </td>
                   <td className="table-cell">
-                    {registration.status === 'pending' && (
+                    {registration.approval_status === 'pending' && (
                       <div className="flex items-center space-x-2">
                         <button
                           onClick={() => handleApprovalClick(registration.id, 'approve')}
@@ -294,7 +294,7 @@ export function PendingRegistrations() {
             </tbody>
           </table>
         </div>
-        
+
         {registrations.length === 0 && (
           <div className="text-center py-12">
             <Clock className="mx-auto h-12 w-12 text-gray-400" />

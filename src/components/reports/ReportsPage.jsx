@@ -40,7 +40,7 @@ export function ReportsPage({ userRole }) {
   };
 
   const fetchVaccinationStats = async () => {
-    const data = dataService.getVaccinationRecords();
+    const data = await dataService.getVaccinationRecords();
 
     const now = new Date();
     const completed = data.filter(v => v.administered_date) || [];
@@ -56,7 +56,8 @@ export function ReportsPage({ userRole }) {
   };
 
   const fetchMonthlyVaccinations = async () => {
-    const data = dataService.getVaccinationRecords().filter(v => v.administered_date);
+    const allRecords = await dataService.getVaccinationRecords();
+    const data = allRecords.filter(v => v.administered_date);
 
     const monthlyCount = {};
     const last6Months = [];
@@ -65,7 +66,10 @@ export function ReportsPage({ userRole }) {
     // Generate last 6 months
     for (let i = 5; i >= 0; i--) {
       const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const monthKey = date.toISOString().slice(0, 7);
+      // Build the key from local date parts, not toISOString() — that
+      // converts to UTC and can shift the month for users east of UTC
+      // (e.g. midnight in Abuja/UTC+1 becomes the previous day/month in UTC).
+      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
       const monthName = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
       last6Months.push({ month: monthName, vaccinations: 0 });
       monthlyCount[monthKey] = 0;
@@ -94,7 +98,8 @@ export function ReportsPage({ userRole }) {
   };
 
   const fetchVaccineDistribution = async () => {
-    const data = dataService.getVaccinationRecords().filter(v => v.administered_date);
+    const allRecords = await dataService.getVaccinationRecords();
+    const data = allRecords.filter(v => v.administered_date);
 
     const vaccineCount = {};
     data.forEach(record => {
@@ -112,7 +117,7 @@ export function ReportsPage({ userRole }) {
   };
 
   const fetchAgeGroupDistribution = async () => {
-    const data = dataService.getPatients();
+    const data = await dataService.getPatients();
 
     const ageGroups = {
       '0-1 years': 0,
