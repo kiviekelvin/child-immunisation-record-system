@@ -45,8 +45,8 @@ A comprehensive web-based system for managing child immunization records, design
 - **Frontend**: React 18 with JSX
 - **Styling**: Tailwind CSS with custom design system
 - **UI Components**: Custom modal system with accessibility features
-- **Data Storage**: Local Storage (no external database required)
-- **Authentication**: Custom authentication service with role-based access
+ - **Data Storage**: Supabase (Postgres) via `@supabase/supabase-js` — cloud-hosted backend
+- **Authentication**: Supabase Auth with role-based profiles (uses a `profiles` table and RLS policies)
 - **Charts**: Recharts for data visualization
 - **Form Handling**: React Hook Form with Zod validation
 - **Date Handling**: date-fns
@@ -181,21 +181,129 @@ npm run build
 npm run preview
 ```
 
-## 💾 Data Storage
+## 💾 Data Storage (Supabase)
 
-The application uses **localStorage** for data persistence, which means:
+This project has been migrated from `localStorage` to Supabase (Postgres). Data and authentication are now backed by your Supabase project using the `@supabase/supabase-js` client.
 
 ✅ **Advantages:**
-- No external database setup required
-- Works offline
-- Instant deployment
-- No hosting costs for database
-- Perfect for demos and small deployments
+- Centralized cloud storage (Postgres) with row-level security (RLS)
+- Built-in authentication and session handling via Supabase Auth
+- Works across devices and users (multi-user support)
 
-⚠️ **Considerations:**
-- Data is stored locally in the browser
-- Data persists across sessions
-- For production use with multiple users, consider migrating to a database
+⚠️ **Important migration notes:**
+- The codebase now expects a Supabase project and the following environment variables (see `.env.example`):
+
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+
+- Several service functions are now asynchronous. Callers that previously read from `localStorage` synchronously must be updated to `await` these methods. Notable examples:
+
+   - `authService.getCurrentUser()` is now `async` and must be awaited by callers.
+   - All methods on `dataService` are `async` and return Promises (e.g. `getPatients()`, `getVaccinationRecords()`).
+
+- The project expects the following tables (names used in code): `profiles`, `patients`, `vaccinations`. RLS policies should be configured appropriately for production.
+
+- Demo/demo-seeded accounts may still be present in the built `dist` bundle used for local demos; production Supabase data is separate and controlled via your Supabase project.
+
+## 🧑‍💻 Developer: Supabase Schema & RLS Examples
+
+-- WARNING: This schema is for context only and is not meant to be run as-is.
+-- Table order and constraints may not be valid for execution.
+
+```sql
+CREATE TABLE public.profiles (
+   id uuid NOT NULL,
+   full_name text NOT NULL,
+   role text NOT NULL CHECK (role = ANY (ARRAY['admin'::text, 'healthcare_worker'::text, 'parent'::text])),
+   approval_status text NOT NULL DEFAULT 'pending'::text CHECK (approval_status = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text])),
+   created_at timestamp with time zone DEFAULT now(),
+   email text,
+   CONSTRAINT profiles_pkey PRIMARY KEY (id),
+   CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.patients (
+   id uuid NOT NULL DEFAULT gen_random_uuid(),
+   parent_id uuid,
+   full_name text NOT NULL,
+   date_of_birth date NOT NULL,
+   gender text CHECK (gender = ANY (ARRAY['male'::text, 'female'::text])),
+   created_by uuid,
+   created_at timestamp with time zone DEFAULT now(),
+   parent_name text,
+   phone text,
+   email text,
+   address text,
+   emergency_contact text,
+   medical_notes text,
+   CONSTRAINT patients_pkey PRIMARY KEY (id),
+   CONSTRAINT patients_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES public.profiles(id),
+   CONSTRAINT patients_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.vaccinations (
+   id uuid NOT NULL DEFAULT gen_random_uuid(),
+   patient_id uuid,
+   vaccine_name text NOT NULL,
+   due_date date NOT NULL,
+   administered_date date,
+   status text NOT NULL DEFAULT 'due'::text CHECK (status = ANY (ARRAY['due'::text, 'overdue'::text, 'completed'::text])),
+   notes text,
+   recorded_by uuid,
+   created_at timestamp with time zone DEFAULT now(),
+   administered_by text,
+   CONSTRAINT vaccinations_pkey PRIMARY KEY (id),
+   CONSTRAINT vaccinations_patient_id_fkey FOREIGN KEY (patient_id) REFERENCES public.patients(id),
+   CONSTRAINT vaccinations_recorded_by_fkey FOREIGN KEY (recorded_by) REFERENCES public.profiles(id)
+);
+```
+
+Example row-level security (RLS) policies to get started. Adapt to your security model and test thoroughly.
+
+```sql
+-- Enable RLS
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.patients ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vaccinations ENABLE ROW LEVEL SECURITY;
+
+-- Profiles: allow users to select their own profile
+CREATE POLICY "Profiles: select own" ON public.profiles
+   FOR SELECT USING (auth.uid() = id);
+
+-- Profiles: allow admins full access (replace with your admin check if different)
+CREATE POLICY "Profiles: admins full access" ON public.profiles
+   FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
+
+-- Patients: parents can read their children
+CREATE POLICY "Patients: parent access" ON public.patients
+   FOR SELECT USING (parent_id = auth.uid());
+
+-- Patients: healthcare workers and admins can read patients
+CREATE POLICY "Patients: staff access" ON public.patients
+   FOR SELECT USING (
+      (SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('healthcare_worker', 'admin')
+   );
+
+-- Patients: allow staff to insert/update (record created_by) and parents to insert if parent_id = auth.uid()
+CREATE POLICY "Patients: insert by staff or parent" ON public.patients
+   FOR INSERT WITH CHECK (
+      (SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('healthcare_worker', 'admin')
+      OR parent_id = auth.uid()
+   );
+
+-- Vaccinations: allow staff to manage vaccination records for patients they can access
+CREATE POLICY "Vaccinations: staff access" ON public.vaccinations
+   FOR ALL USING (
+      (SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('healthcare_worker', 'admin')
+      OR EXISTS (
+         SELECT 1 FROM public.patients p WHERE p.id = public.vaccinations.patient_id AND p.parent_id = auth.uid()
+      )
+   );
+```
+
+Notes:
+- These examples use `auth.uid()` (Supabase Postgres function) and simple subqueries for role checks. For production, consider implementing helper functions or more explicit role management to simplify policies.
+- Test policies with Supabase Studio and a staging project before deploying to production.
+- Adjust policies to your exact trust model (e.g., restrict which staff can see which patients, allow read-only for parents, etc.).
+
 
 ## 🔒 Security Features
 
